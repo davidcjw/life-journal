@@ -60,8 +60,8 @@ export default async function PrintPage({
               {e.description}
             </p>
           ) : null}
-          <div className="mt-6 flex flex-1">
-            <PhotoCollage photos={e.photoUrls} title={e.title} eager />
+          <div className="mt-6">
+            <PhotoCollage photos={e.photoUrls} title={e.title} eager variant="flow" />
           </div>
           <span className="mt-6 self-end font-body text-[0.65rem] tracking-[0.2em] text-ink-faint">
             {i + 1}

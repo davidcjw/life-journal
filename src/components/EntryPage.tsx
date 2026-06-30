@@ -35,7 +35,7 @@ export function EntryPage({
       </header>
 
       {entry.description ? (
-        <p className="mt-3 shrink-0 font-body text-[0.86rem] leading-relaxed text-ink-soft line-clamp-6">
+        <p className="mt-3 shrink-0 font-body text-[0.86rem] leading-relaxed text-ink-soft line-clamp-4">
           {entry.description}
         </p>
       ) : null}
