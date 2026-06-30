@@ -1,26 +1,273 @@
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+@theme {
+  --color-paper: #fffaf2;
+  --color-paper-2: #fef5e9;
+  --color-paper-edge: #ecdfcd;
+  --color-ink: #2c2219;
+  --color-ink-soft: #786755;
+  --color-ink-faint: #a8927a;
+  --color-brown: #92400e;
+  --color-gold: #a16207;
+  --color-accent: #5b54e6;
+  --color-accent-soft: #ecebfb;
+  --color-desk: #241d18;
+
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-body: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+  --font-hand: var(--font-caveat), "Segoe Script", cursive;
+
+  --shadow-soft: 0 1px 2px rgba(44, 34, 25, 0.06), 0 8px 24px rgba(44, 34, 25, 0.1);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    font-family: var(--font-body);
+    color: var(--color-ink);
+    background-color: var(--color-desk);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ── The "desk" the book rests on ──────────────────────────────────────────── */
+.lj-desk {
+  position: relative;
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(255, 240, 214, 0.16), transparent 60%),
+    radial-gradient(140% 120% at 50% 120%, rgba(0, 0, 0, 0.45), transparent 55%),
+    repeating-linear-gradient(
+      94deg,
+      #271f19 0px,
+      #271f19 3px,
+      #2c241d 3px,
+      #2c241d 6px
+    ),
+    linear-gradient(180deg, #2a221c 0%, #211a15 100%);
+}
+.lj-desk::after {
+  /* soft grain overlay */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+
+/* ── Paper page surface (shared by flipbook leaves + exports) ───────────────── */
+.lj-page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(115% 90% at 100% 0%, rgba(146, 64, 14, 0.05), transparent 45%),
+    radial-gradient(120% 90% at 0% 100%, rgba(161, 98, 7, 0.05), transparent 45%),
+    linear-gradient(180deg, var(--color-paper) 0%, var(--color-paper-2) 100%);
+  color: var(--color-ink);
+  overflow: hidden;
+}
+.lj-page::before {
+  /* faint paper fiber */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(120, 103, 85, 0.035) 0 1px, transparent 1px 3px);
+}
+
+/* binding-side shadow so a leaf looks attached to the spine */
+.lj-page[data-bind="left"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42px;
+  background: linear-gradient(90deg, rgba(44, 34, 25, 0.16), transparent);
+  pointer-events: none;
+}
+.lj-page[data-bind="right"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 42px;
+  background: linear-gradient(270deg, rgba(44, 34, 25, 0.16), transparent);
+  pointer-events: none;
+}
+
+/* ── Photo frames ──────────────────────────────────────────────────────────── */
+.photo-frame {
+  background: #fffdf9;
+  padding: 6px;
+  border-radius: 3px;
+  box-shadow:
+    0 1px 1px rgba(44, 34, 25, 0.12),
+    0 10px 18px rgba(44, 34, 25, 0.16);
+  border: 1px solid rgba(44, 34, 25, 0.06);
+}
+.photo-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 1px;
+  background: var(--color-paper-edge);
+}
+
+/* ── Hardcover ─────────────────────────────────────────────────────────────── */
+.lj-cover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  color: #f4e3c4;
+  background:
+    radial-gradient(120% 90% at 25% 15%, rgba(255, 232, 191, 0.12), transparent 55%),
+    linear-gradient(145deg, #6b3410 0%, #823c10 38%, #5a2c0c 100%);
+  overflow: hidden;
+}
+.lj-cover::before {
+  /* leather grain */
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    radial-gradient(rgba(0, 0, 0, 0.22) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 4px 4px, 5px 5px;
+  background-position: 0 0, 2px 2px;
+}
+.foil {
+  background: linear-gradient(180deg, #fde6b8 0%, #e7b864 45%, #c79338 60%, #f4dca0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+.foil-border {
+  border-color: rgba(231, 184, 100, 0.6);
+}
+
+/* ── Buttons / toolbar ─────────────────────────────────────────────────────── */
+.lj-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-ink);
+  background: rgba(255, 250, 242, 0.92);
+  border: 1px solid var(--color-paper-edge);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: transform 200ms ease, background-color 200ms ease, box-shadow 200ms ease,
+    opacity 200ms ease;
+}
+.lj-btn:hover {
+  background: #fffdf9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+.lj-btn:active {
+  transform: translateY(0);
+}
+.lj-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.lj-btn-ghost {
+  background: rgba(255, 250, 242, 0.1);
+  color: #f3e6cf;
+  border-color: rgba(243, 230, 207, 0.25);
+}
+.lj-btn-ghost:hover {
+  background: rgba(255, 250, 242, 0.18);
+}
+.lj-icon-btn {
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  justify-content: center;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* react-pageflip tidy-up */
+.lj-book {
+  margin: 0 auto;
+}
+.stf__parent {
+  margin: 0 auto;
+}
+
+/* ── Print / PDF document ──────────────────────────────────────────────────── */
+.lj-print-doc {
+  background: var(--color-desk);
+  padding: 2.5rem 1rem;
+}
+.lj-print-page {
+  width: 190mm;
+  min-height: 247mm;
+  margin: 0 auto 1.4rem;
+  border-radius: 4px;
+  box-shadow: var(--shadow-soft);
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .lj-print-doc {
+    background: #fff;
+    padding: 0;
+  }
+  .lj-print-page {
+    width: 100%;
+    min-height: auto;
+    margin: 0;
+    box-shadow: none;
+    border-radius: 0;
+    page-break-after: always;
+    break-after: page;
+  }
+  .lj-print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

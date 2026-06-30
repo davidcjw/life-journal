@@ -6,12 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed": "node --env-file=.env.local scripts/seed.mjs",
+    "seed:clear": "node --env-file=.env.local scripts/seed.mjs --clear",
+    "set-webhook": "node --env-file=.env.local scripts/set-webhook.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "date-fns": "^4.4.0",
+    "framer-motion": "^12.42.0",
     "next": "16.2.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-pageflip": "^2.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
