@@ -102,7 +102,7 @@ npm run set-webhook -- https://your-app.vercel.app
 
 All configuration is via environment variables — see [`.env.example`](.env.example) for the annotated list. Notable optional ones:
 
-- `SITE_PASSWORD` — if set, the whole site requires this password (HTTP Basic auth).
+- `SITE_PASSWORD` — if set, the whole site is gated behind a login page asking for this password.
 - `JOURNAL_TITLE` / `JOURNAL_SUBTITLE` — cover text.
 - `JOURNAL_TIMEZONE` — used for `/today` and date display (default `Asia/Singapore`).
 - `JOURNAL_BOT_USERNAME` — adds an "Add a memory" link to the book.
