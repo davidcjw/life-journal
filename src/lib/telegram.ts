@@ -31,6 +31,31 @@ export async function sendChatAction(chatId: number | string, action = "upload_p
   await call("sendChatAction", { chat_id: chatId, action });
 }
 
+/** Acknowledge a tapped inline button (clears its loading spinner). */
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+): Promise<void> {
+  await call("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
+}
+
+/** Edit an existing message in place (used to swap inline-keyboard menus). */
+export async function editMessageText(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  await call("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
+    ...extra,
+  });
+}
+
 /** Resolve a Telegram file_id to a temporary file_path. */
 export async function getFilePath(fileId: string): Promise<string | null> {
   const r = await call<{ file_path?: string }>("getFile", { file_id: fileId });

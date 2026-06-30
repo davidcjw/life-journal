@@ -1,14 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { config } from "@/lib/config";
 import { getServiceClient } from "@/lib/supabase";
-import { sendMessage, sendChatAction, getFilePath, downloadFile } from "@/lib/telegram";
-import { parseDateInput, formatLongDate } from "@/lib/dates";
+import {
+  sendMessage,
+  sendChatAction,
+  getFilePath,
+  downloadFile,
+  answerCallbackQuery,
+  editMessageText,
+} from "@/lib/telegram";
+import {
+  getRecentEntries,
+  getEntryById,
+  updateEntryTitle,
+  updateEntryDate,
+  updateEntryDescription,
+  addEntryPhoto,
+  deleteEntryPhoto,
+  type Entry,
+} from "@/lib/entries";
+import { parseDateInput, formatLongDate, formatShortDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-type Step = "idle" | "awaiting_title" | "awaiting_date" | "awaiting_description" | "awaiting_photos";
+type Step =
+  | "idle"
+  | "awaiting_title"
+  | "awaiting_date"
+  | "awaiting_description"
+  | "awaiting_photos"
+  | "editing_title"
+  | "editing_date"
+  | "editing_description"
+  | "editing_photos";
 
 type Draft = {
   chat_id: number;
@@ -17,6 +43,7 @@ type Draft = {
   event_date: string | null;
   description: string | null;
   photos: string[];
+  edit_entry_id: string | null;
 };
 
 type TgPhotoSize = { file_id: string; width: number; height: number };
@@ -28,7 +55,13 @@ type TgMessage = {
   caption?: string;
   photo?: TgPhotoSize[];
 };
-type TgUpdate = { message?: TgMessage };
+type TgCallbackQuery = {
+  id: string;
+  from?: { id: number };
+  message?: { message_id: number; chat: { id: number; type: string } };
+  data?: string;
+};
+type TgUpdate = { message?: TgMessage; callback_query?: TgCallbackQuery };
 
 const ok = () => NextResponse.json({ ok: true });
 
@@ -37,7 +70,7 @@ async function getDraft(chatId: number): Promise<Draft> {
   const supabase = getServiceClient();
   const { data } = await supabase
     .from("journal_bot_drafts")
-    .select("chat_id,step,title,event_date,description,photos")
+    .select("chat_id,step,title,event_date,description,photos,edit_entry_id")
     .eq("chat_id", chatId)
     .maybeSingle();
   return (
@@ -48,6 +81,7 @@ async function getDraft(chatId: number): Promise<Draft> {
       event_date: null,
       description: null,
       photos: [],
+      edit_entry_id: null,
     }
   );
 }
@@ -93,6 +127,7 @@ function helpText(chatId: number): string {
     "4. send a <b>description</b>, or /skip\n" +
     "5. send up to <b>3 photos</b>\n" +
     "6. /done — save it ✨\n\n" +
+    "✏️ <b>Edit a memory:</b> /edit — change the title, date, description, or photos of a recent memory.\n\n" +
     "Anytime: /cancel to discard, /help to see this." +
     lock
   );
@@ -197,6 +232,195 @@ function extToMime(ext: string): string {
   }
 }
 
+// ── Editing existing memories (inline-button driven) ─────────────────────────
+type InlineButton = { text: string; callback_data: string };
+
+function entrySummary(e: Entry): string {
+  const desc = e.description ? escapeHtml(e.description) : "<i>(no description)</i>";
+  const n = e.photos.length;
+  return (
+    "✏️ <b>Editing memory</b>\n\n" +
+    `🗓️ ${formatLongDate(e.event_date)}\n` +
+    `📌 ${escapeHtml(e.title)}\n` +
+    `📝 ${desc}\n` +
+    `🖼️ ${n}/${config.maxPhotos} photo${n === 1 ? "" : "s"}\n\n` +
+    "What would you like to change?"
+  );
+}
+
+function fieldMenu(id: string): { inline_keyboard: InlineButton[][] } {
+  return {
+    inline_keyboard: [
+      [
+        { text: "📌 Title", callback_data: `ef:title:${id}` },
+        { text: "🗓️ Date", callback_data: `ef:date:${id}` },
+      ],
+      [
+        { text: "📝 Description", callback_data: `ef:desc:${id}` },
+        { text: "🖼️ Photos", callback_data: `ef:photos:${id}` },
+      ],
+      [{ text: "✅ Done", callback_data: "ef:close" }],
+    ],
+  };
+}
+
+function photosMenu(e: Entry): { inline_keyboard: InlineButton[][] } {
+  const rows: InlineButton[][] = e.photos.map((_, i) => [
+    { text: `🗑️ Remove photo ${i + 1}`, callback_data: `ef:rm:${e.id}:${i}` },
+  ]);
+  if (e.photos.length < config.maxPhotos) {
+    rows.push([{ text: "➕ Add photo", callback_data: `ef:add:${e.id}` }]);
+  }
+  rows.push([{ text: "⬅️ Back", callback_data: `edit:${e.id}` }]);
+  return { inline_keyboard: rows };
+}
+
+/** Show (or update in place) the per-memory field menu. Clears any input step. */
+async function showFieldMenu(chatId: number, id: string, messageId?: number): Promise<void> {
+  await saveDraft(chatId, { step: "idle", edit_entry_id: null });
+  const entry = await getEntryById(id);
+  if (!entry) {
+    await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
+    return;
+  }
+  const reply_markup = fieldMenu(id);
+  if (messageId) await editMessageText(chatId, messageId, entrySummary(entry), { reply_markup });
+  else await sendMessage(chatId, entrySummary(entry), { reply_markup });
+}
+
+/** Show (or update in place) the photos sub-menu. Clears any input step. */
+async function showPhotosMenu(chatId: number, id: string, messageId?: number): Promise<void> {
+  await saveDraft(chatId, { step: "idle", edit_entry_id: null });
+  const entry = await getEntryById(id);
+  if (!entry) {
+    await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
+    return;
+  }
+  const text =
+    `🖼️ <b>Photos</b> (${entry.photos.length}/${config.maxPhotos})\n` +
+    "Tap a photo to remove it, or add a new one.";
+  const reply_markup = photosMenu(entry);
+  if (messageId) await editMessageText(chatId, messageId, text, { reply_markup });
+  else await sendMessage(chatId, text, { reply_markup });
+}
+
+async function handleEditPhoto(chatId: number, id: string, photo: TgPhotoSize[]): Promise<void> {
+  await sendChatAction(chatId, "upload_photo");
+  const largest = photo[photo.length - 1]; // last size = highest resolution
+  const filePath = await getFilePath(largest.file_id);
+  if (!filePath) {
+    await sendMessage(chatId, "⚠️ Couldn't fetch that photo from Telegram. Try sending it again.");
+    return;
+  }
+  const { bytes } = await downloadFile(filePath);
+  const ext = filePath.split(".").pop() || "jpg"; // addEntryPhoto normalizes this
+  const result = await addEntryPhoto(id, bytes, ext);
+  if (!result.ok) {
+    await saveDraft(chatId, { step: "idle", edit_entry_id: null });
+    if (result.reason === "full") {
+      await sendMessage(chatId, `That memory already has ${config.maxPhotos} photos (the max).`);
+    } else {
+      await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
+    }
+    return;
+  }
+  const entry = await getEntryById(id);
+  const n = entry?.photos.length ?? 0;
+  if (n >= config.maxPhotos) {
+    await saveDraft(chatId, { step: "idle", edit_entry_id: null });
+    await sendMessage(chatId, `📸 Added — that's the max (${config.maxPhotos}).`);
+    await showFieldMenu(chatId, id);
+    return;
+  }
+  // Stay in editing_photos so more can be added one at a time.
+  await sendMessage(chatId, `📸 Added (${n}/${config.maxPhotos}). Send another, or tap Done.`, {
+    reply_markup: { inline_keyboard: [[{ text: "✅ Done", callback_data: `edit:${id}` }]] },
+  });
+}
+
+async function handleCallback(cb: TgCallbackQuery): Promise<void> {
+  const chatId = cb.message?.chat.id;
+  const messageId = cb.message?.message_id;
+  if (chatId == null || messageId == null) {
+    await answerCallbackQuery(cb.id);
+    return;
+  }
+  if (!isAllowed(chatId)) {
+    await answerCallbackQuery(cb.id, "This is a private journal bot.");
+    return;
+  }
+  await answerCallbackQuery(cb.id); // ack to clear the button spinner
+  const data = cb.data ?? "";
+
+  // edit:<id> — show the field menu (also used as the "Back"/"Done adding" target)
+  if (data.startsWith("edit:")) {
+    await showFieldMenu(chatId, data.slice("edit:".length), messageId);
+    return;
+  }
+  if (data === "ef:close") {
+    await saveDraft(chatId, { step: "idle", edit_entry_id: null });
+    await editMessageText(
+      chatId,
+      messageId,
+      "✅ <b>Done editing.</b> Send /edit to make more changes.",
+    );
+    return;
+  }
+
+  // ef:<field>:<id> — title | date | desc | photos | add
+  const field = data.match(/^ef:(title|date|desc|photos|add):(.+)$/);
+  if (field) {
+    const [, kind, id] = field;
+    if (kind === "photos") {
+      await showPhotosMenu(chatId, id, messageId);
+      return;
+    }
+    const entry = await getEntryById(id);
+    if (!entry) {
+      await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
+      return;
+    }
+    if (kind === "add") {
+      if (entry.photos.length >= config.maxPhotos) {
+        await showPhotosMenu(chatId, id, messageId);
+        return;
+      }
+      await saveDraft(chatId, { step: "editing_photos", edit_entry_id: id });
+      await sendMessage(chatId, `📷 Send a photo to add to "<b>${escapeHtml(entry.title)}</b>".`);
+      return;
+    }
+    const stepByKind = {
+      title: "editing_title",
+      date: "editing_date",
+      desc: "editing_description",
+    } as const;
+    await saveDraft(chatId, { step: stepByKind[kind as keyof typeof stepByKind], edit_entry_id: id });
+    const prompt =
+      kind === "title"
+        ? "✍️ Send the new <b>title</b>."
+        : kind === "date"
+          ? "🗓️ Send the new <b>date</b> (e.g. <code>2026-06-30</code>) or /today."
+          : "📝 Send the new <b>description</b>, or /clear to remove it.";
+    await sendMessage(chatId, prompt);
+    return;
+  }
+
+  // ef:rm:<id>:<idx> — remove a photo by index
+  const rm = data.match(/^ef:rm:(.+):(\d+)$/);
+  if (rm) {
+    const [, id, idxStr] = rm;
+    const entry = await getEntryById(id);
+    if (!entry) {
+      await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
+      return;
+    }
+    const path = entry.photos[Number(idxStr)];
+    if (path) await deleteEntryPhoto(id, path);
+    await showPhotosMenu(chatId, id, messageId);
+    return;
+  }
+}
+
 // ── Webhook ──────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // Verify the shared secret Telegram echoes back.
@@ -211,6 +435,21 @@ export async function POST(req: NextRequest) {
   try {
     update = (await req.json()) as TgUpdate;
   } catch {
+    return ok();
+  }
+
+  // Inline-button taps (the edit flow) arrive as callback queries.
+  if (update.callback_query) {
+    try {
+      await handleCallback(update.callback_query);
+    } catch (err) {
+      console.error("[telegram webhook] callback error", err);
+      try {
+        await answerCallbackQuery(update.callback_query.id);
+      } catch {
+        /* ignore */
+      }
+    }
     return ok();
   }
 
@@ -248,6 +487,24 @@ export async function POST(req: NextRequest) {
         photos: [],
       });
       await sendMessage(chatId, "📌 <b>New memory.</b> What's the title?");
+      return ok();
+    }
+    if (command === "/edit") {
+      await clearDraft(chatId, true); // discard any half-finished /new draft + its photos
+      const entries = await getRecentEntries(10);
+      if (!entries.length) {
+        await sendMessage(chatId, "You don't have any memories yet. Send /new to add one.");
+        return ok();
+      }
+      const rows = entries.map((e) => [
+        {
+          text: `${formatShortDate(e.event_date)} · ${e.title}`.slice(0, 60),
+          callback_data: `edit:${e.id}`,
+        },
+      ]);
+      await sendMessage(chatId, "✏️ <b>Edit a memory</b>\nPick one to change:", {
+        reply_markup: { inline_keyboard: rows },
+      });
       return ok();
     }
 
@@ -318,6 +575,79 @@ export async function POST(req: NextRequest) {
           return ok();
         }
         await sendMessage(chatId, "📷 Send a photo, or /done to save this memory.");
+        return ok();
+      }
+
+      case "editing_title": {
+        const id = draft.edit_entry_id;
+        if (!id) {
+          await sendMessage(chatId, "Send /edit to pick a memory to change.");
+          return ok();
+        }
+        if (!text || command) {
+          await sendMessage(chatId, "Please send the new title as text. ✍️");
+          return ok();
+        }
+        await updateEntryTitle(id, text);
+        await sendMessage(chatId, "✅ Title updated.");
+        await showFieldMenu(chatId, id);
+        return ok();
+      }
+
+      case "editing_date": {
+        const id = draft.edit_entry_id;
+        if (!id) {
+          await sendMessage(chatId, "Send /edit to pick a memory to change.");
+          return ok();
+        }
+        const date = parseDateInput(text ?? "", config.timezone);
+        if (!date) {
+          await sendMessage(
+            chatId,
+            "I couldn't read that date. Try <code>2026-06-30</code>, <code>30/06/2026</code>, or /today.",
+          );
+          return ok();
+        }
+        await updateEntryDate(id, date);
+        await sendMessage(chatId, `✅ Date updated to ${formatLongDate(date)}.`);
+        await showFieldMenu(chatId, id);
+        return ok();
+      }
+
+      case "editing_description": {
+        const id = draft.edit_entry_id;
+        if (!id) {
+          await sendMessage(chatId, "Send /edit to pick a memory to change.");
+          return ok();
+        }
+        if (command && command !== "/clear") {
+          await sendMessage(chatId, "Send a description as text, or /clear to remove it.");
+          return ok();
+        }
+        if (!command && !text) {
+          await sendMessage(chatId, "Send a description as text, or /clear to remove it.");
+          return ok();
+        }
+        const description = command === "/clear" ? null : (text ?? "").slice(0, 4000);
+        await updateEntryDescription(id, description);
+        await sendMessage(chatId, description ? "✅ Description updated." : "✅ Description cleared.");
+        await showFieldMenu(chatId, id);
+        return ok();
+      }
+
+      case "editing_photos": {
+        const id = draft.edit_entry_id;
+        if (!id) {
+          await sendMessage(chatId, "Send /edit to pick a memory to change.");
+          return ok();
+        }
+        if (msg.photo && msg.photo.length) {
+          await handleEditPhoto(chatId, id, msg.photo);
+          return ok();
+        }
+        await sendMessage(chatId, "📷 Send a photo to add, or tap Done.", {
+          reply_markup: { inline_keyboard: [[{ text: "✅ Done", callback_data: `edit:${id}` }]] },
+        });
         return ok();
       }
 

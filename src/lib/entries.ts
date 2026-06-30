@@ -28,6 +28,19 @@ export async function getEntries(): Promise<Entry[]> {
   return (data ?? []) as Entry[];
 }
 
+/** The most recently-dated entries first (for the Telegram edit picker). */
+export async function getRecentEntries(limit = 10): Promise<Entry[]> {
+  const supabase = getServiceClient();
+  const { data, error } = await supabase
+    .from("journal_entries")
+    .select("id,event_date,title,description,photos,created_at")
+    .order("event_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as Entry[];
+}
+
 /** Sign a batch of storage paths into temporary URLs (order-independent via map). */
 export async function signPhotoUrls(paths: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -91,6 +104,29 @@ async function getEntry(id: string): Promise<Entry | null> {
     .maybeSingle();
   if (error) throw error;
   return (data as Entry | null) ?? null;
+}
+
+/** Public lookup of a single entry by id (null if it no longer exists). */
+export async function getEntryById(id: string): Promise<Entry | null> {
+  return getEntry(id);
+}
+
+/** Update an entry's title (trimmed, capped to match the /new flow). */
+export async function updateEntryTitle(id: string, title: string): Promise<void> {
+  const value = title.trim().slice(0, 200);
+  const supabase = getServiceClient();
+  const { error } = await supabase.from("journal_entries").update({ title: value }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Update an entry's event date (caller passes an already-parsed YYYY-MM-DD). */
+export async function updateEntryDate(id: string, eventDate: string): Promise<void> {
+  const supabase = getServiceClient();
+  const { error } = await supabase
+    .from("journal_entries")
+    .update({ event_date: eventDate })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 /** Update an entry's free-text description (null clears it). */
