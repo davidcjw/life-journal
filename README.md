@@ -11,6 +11,20 @@
   <img src="docs/demo.png" alt="Live Journal — a flip-through digital photo book" width="720">
 </p>
 
+## Contents
+
+- [What it is](#what-it-is)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Using the bot](#using-the-bot)
+- [Exports](#exports)
+- [Configuration](#configuration)
+- [Tech stack](#tech-stack)
+- [Contributing](#contributing)
+- [Code of Conduct](#code-of-conduct)
+- [License](#license)
+
 ## What it is
 
 You take a photo of a moment worth keeping — your kid's first birthday, a trip, an ordinary good day. You send it to a private Telegram bot with a date and a sentence. The bot files it away, and your **Live Journal** — a web page that looks and flips like a real photo book — updates itself. When you want to share or archive it, export the whole thing as a self-contained HTML file or save it as a PDF.
