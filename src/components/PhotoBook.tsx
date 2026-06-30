@@ -5,7 +5,8 @@ import dynamic from "next/dynamic";
 import { motion, useReducedMotion } from "framer-motion";
 import type { FlipApi } from "./Flipbook";
 import type { EntryPageData } from "./EntryPage";
-import { ChevronLeft, ChevronRight, Download, Printer, Send } from "./icons";
+import { EditMemories, type EditEntryData } from "./EditMemories";
+import { ChevronLeft, ChevronRight, Download, Pencil, Printer, Send } from "./icons";
 
 const Flipbook = dynamic(() => import("./Flipbook"), {
   ssr: false,
@@ -16,14 +17,24 @@ const Flipbook = dynamic(() => import("./Flipbook"), {
 
 export type PhotoBookProps = {
   entries: (EntryPageData & { id: string })[];
+  editEntries: EditEntryData[];
+  maxPhotos: number;
   title: string;
   subtitle: string;
   botUsername?: string;
 };
 
-export function PhotoBook({ entries, title, subtitle, botUsername }: PhotoBookProps) {
+export function PhotoBook({
+  entries,
+  editEntries,
+  maxPhotos,
+  title,
+  subtitle,
+  botUsername,
+}: PhotoBookProps) {
   const [api, setApi] = useState<FlipApi | null>(null);
   const [page, setPage] = useState(0);
+  const [editing, setEditing] = useState(false);
   const reduce = useReducedMotion();
 
   const onApi = useCallback((a: FlipApi) => setApi(a), []);
@@ -51,6 +62,16 @@ export function PhotoBook({ entries, title, subtitle, botUsername }: PhotoBookPr
       <header className="no-print z-20 flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <span className="font-display text-lg font-semibold text-[#f0e2c9]">{title}</span>
         <nav className="flex items-center gap-2">
+          {editEntries.length > 0 ? (
+            <button
+              className="lj-btn lj-btn-ghost"
+              onClick={() => setEditing(true)}
+              aria-label="Edit recent memories"
+            >
+              <Pencil width={16} height={16} />
+              <span className="hidden sm:inline">Edit</span>
+            </button>
+          ) : null}
           <a className="lj-btn lj-btn-ghost" href="/api/export/html" aria-label="Download as HTML">
             <Download width={16} height={16} />
             <span className="hidden sm:inline">HTML</span>
@@ -120,6 +141,13 @@ export function PhotoBook({ entries, title, subtitle, botUsername }: PhotoBookPr
           <span className="hidden sm:inline">Add a memory</span>
         </a>
       ) : null}
+
+      <EditMemories
+        open={editing}
+        onClose={() => setEditing(false)}
+        entries={editEntries}
+        maxPhotos={maxPhotos}
+      />
     </div>
   );
 }

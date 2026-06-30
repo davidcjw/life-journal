@@ -11,7 +11,8 @@ export type Entry = {
   created_at: string;
 };
 
-export type EntryWithUrls = Entry & { photoUrls: string[] };
+export type PhotoItem = { path: string; url: string };
+export type EntryWithUrls = Entry & { photoUrls: string[]; photoItems: PhotoItem[] };
 
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
 
@@ -47,10 +48,114 @@ export async function signPhotoUrls(paths: string[]): Promise<Map<string, string
 export async function getEntriesWithUrls(): Promise<EntryWithUrls[]> {
   const entries = await getEntries();
   const signed = await signPhotoUrls(entries.flatMap((e) => e.photos));
-  return entries.map((e) => ({
-    ...e,
-    photoUrls: e.photos.map((p) => signed.get(p)).filter((u): u is string => Boolean(u)),
-  }));
+  return entries.map((e) => {
+    const photoItems: PhotoItem[] = e.photos
+      .map((path) => ({ path, url: signed.get(path) }))
+      .filter((i): i is PhotoItem => Boolean(i.url));
+    return { ...e, photoItems, photoUrls: photoItems.map((i) => i.url) };
+  });
+}
+
+// ── Editing existing entries ─────────────────────────────────────────────────
+
+const IMAGE_EXTS = ["jpg", "jpeg", "png", "webp", "heic", "heif"] as const;
+
+/** Map an image extension to the MIME type the storage bucket accepts. */
+export function imageExtToMime(ext: string): string {
+  switch (ext.toLowerCase()) {
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    default:
+      return "image/jpeg";
+  }
+}
+
+/** Normalize a filename/mime hint to a supported image extension (defaults to jpg). */
+export function normalizeImageExt(hint: string): string {
+  const ext = (hint.split(".").pop() || hint).toLowerCase();
+  return (IMAGE_EXTS as readonly string[]).includes(ext) ? ext : "jpg";
+}
+
+async function getEntry(id: string): Promise<Entry | null> {
+  const supabase = getServiceClient();
+  const { data, error } = await supabase
+    .from("journal_entries")
+    .select("id,event_date,title,description,photos,created_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Entry | null) ?? null;
+}
+
+/** Update an entry's free-text description (null clears it). */
+export async function updateEntryDescription(
+  id: string,
+  description: string | null,
+): Promise<void> {
+  const value = description && description.trim().length ? description.trim().slice(0, 4000) : null;
+  const supabase = getServiceClient();
+  const { error } = await supabase
+    .from("journal_entries")
+    .update({ description: value })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/**
+ * Upload a new photo for an entry and append its path. Enforces the per-entry
+ * photo cap. Returns the stored path plus a signed URL for immediate display.
+ */
+export async function addEntryPhoto(
+  id: string,
+  bytes: Uint8Array,
+  ext: string,
+): Promise<{ ok: true; item: PhotoItem } | { ok: false; reason: "not_found" | "full" }> {
+  const entry = await getEntry(id);
+  if (!entry) return { ok: false, reason: "not_found" };
+  if (entry.photos.length >= config.maxPhotos) return { ok: false, reason: "full" };
+
+  const supabase = getServiceClient();
+  const safeExt = normalizeImageExt(ext);
+  const objectPath = `entries/${crypto.randomUUID()}.${safeExt}`;
+  const up = await supabase.storage
+    .from(config.photosBucket)
+    .upload(objectPath, bytes, { contentType: imageExtToMime(safeExt), upsert: false });
+  if (up.error) throw up.error;
+
+  const photos = [...entry.photos, objectPath];
+  const { error } = await supabase.from("journal_entries").update({ photos }).eq("id", id);
+  if (error) {
+    // Roll back the orphaned upload so storage doesn't drift from the row.
+    await supabase.storage.from(config.photosBucket).remove([objectPath]).catch(() => {});
+    throw error;
+  }
+
+  const signed = await signPhotoUrls([objectPath]);
+  return { ok: true, item: { path: objectPath, url: signed.get(objectPath) ?? "" } };
+}
+
+/** Remove one photo (by storage path) from an entry, then delete the object. */
+export async function deleteEntryPhoto(
+  id: string,
+  path: string,
+): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+  const entry = await getEntry(id);
+  if (!entry) return { ok: false, reason: "not_found" };
+  if (!entry.photos.includes(path)) return { ok: false, reason: "not_found" };
+
+  const supabase = getServiceClient();
+  const photos = entry.photos.filter((p) => p !== path);
+  const { error } = await supabase.from("journal_entries").update({ photos }).eq("id", id);
+  if (error) throw error;
+  // Best-effort object cleanup; the row is already consistent.
+  await supabase.storage.from(config.photosBucket).remove([path]).catch(() => {});
+  return { ok: true };
 }
 
 /** Download a single photo's bytes (for self-contained HTML export). */
