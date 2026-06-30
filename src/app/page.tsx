@@ -21,9 +21,24 @@ export default async function Home() {
     photoUrls: e.photoUrls,
   }));
 
+  // Editor list: most recently added memories first, capped to keep it focused.
+  const RECENT_EDITABLE = 12;
+  const editEntries = [...entries]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, RECENT_EDITABLE)
+    .map((e) => ({
+      id: e.id,
+      event_date: e.event_date,
+      title: e.title,
+      description: e.description,
+      photos: e.photoItems,
+    }));
+
   return (
     <PhotoBook
       entries={data}
+      editEntries={editEntries}
+      maxPhotos={config.maxPhotos}
       title={config.title}
       subtitle={config.subtitle}
       botUsername={config.botUsername || undefined}
