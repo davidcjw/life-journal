@@ -141,15 +141,19 @@ async function handlePhoto(chatId: number, draft: Draft, photo: TgPhotoSize[]): 
     await sendMessage(chatId, "⚠️ Couldn't fetch that photo from Telegram. Try sending it again.");
     return;
   }
-  const { bytes, contentType } = await downloadFile(filePath);
-  const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
+  const { bytes } = await downloadFile(filePath);
+  // Telegram serves files as application/octet-stream, which the bucket's mime
+  // whitelist rejects — derive the type from the extension instead (photos are JPEG).
+  const rawExt = (filePath.split(".").pop() || "").toLowerCase();
+  const ext = ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(rawExt) ? rawExt : "jpg";
   const objectPath = `entries/${crypto.randomUUID()}.${ext}`;
 
   const supabase = getServiceClient();
   const up = await supabase.storage
     .from(config.photosBucket)
-    .upload(objectPath, bytes, { contentType, upsert: false });
+    .upload(objectPath, bytes, { contentType: extToMime(ext), upsert: false });
   if (up.error) {
+    console.error("[telegram webhook] storage upload failed:", up.error.message);
     await sendMessage(chatId, "⚠️ Couldn't store that photo. Try sending it again.");
     return;
   }
@@ -176,6 +180,21 @@ async function handlePhoto(chatId: number, draft: Draft, photo: TgPhotoSize[]): 
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function extToMime(ext: string): string {
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    default:
+      return "image/jpeg";
+  }
 }
 
 // ── Webhook ──────────────────────────────────────────────────────────────────
