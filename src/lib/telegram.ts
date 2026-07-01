@@ -1,5 +1,45 @@
 import { config } from "./config";
 
+// ── Pure parsing helpers (no I/O) ────────────────────────────────────────────
+
+/**
+ * Extract the leading slash-command from a message, or null if the text is not
+ * a command. Strips a trailing `@botname`, ignores any arguments, and lowercases
+ * the result — e.g. "  /New@MyBot foo " -> "/new".
+ */
+export function parseCommand(text: string | null | undefined): string | null {
+  const t = text?.trim();
+  if (!t || !t.startsWith("/")) return null;
+  return t.split(/\s+/)[0].split("@")[0].toLowerCase();
+}
+
+export type CallbackAction =
+  | { kind: "edit"; id: string }
+  | { kind: "close" }
+  | { kind: "field"; field: "title" | "date" | "desc" | "photos" | "add"; id: string }
+  | { kind: "removePhoto"; id: string; index: number }
+  | { kind: "unknown" };
+
+/** Parse inline-button `callback_data` into a structured edit-flow action. */
+export function parseCallbackData(data: string): CallbackAction {
+  if (data.startsWith("edit:")) return { kind: "edit", id: data.slice("edit:".length) };
+  if (data === "ef:close") return { kind: "close" };
+
+  const field = data.match(/^ef:(title|date|desc|photos|add):(.+)$/);
+  if (field) {
+    return {
+      kind: "field",
+      field: field[1] as "title" | "date" | "desc" | "photos" | "add",
+      id: field[2],
+    };
+  }
+
+  const rm = data.match(/^ef:rm:(.+):(\d+)$/);
+  if (rm) return { kind: "removePhoto", id: rm[1], index: Number(rm[2]) };
+
+  return { kind: "unknown" };
+}
+
 const base = () => `https://api.telegram.org/bot${config.telegramBotToken}`;
 
 type TgResult<T> = { ok: boolean; result?: T; description?: string };

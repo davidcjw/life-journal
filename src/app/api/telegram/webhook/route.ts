@@ -8,6 +8,8 @@ import {
   downloadFile,
   answerCallbackQuery,
   editMessageText,
+  parseCommand,
+  parseCallbackData,
 } from "@/lib/telegram";
 import {
   getRecentEntries,
@@ -350,14 +352,14 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
     return;
   }
   await answerCallbackQuery(cb.id); // ack to clear the button spinner
-  const data = cb.data ?? "";
+  const action = parseCallbackData(cb.data ?? "");
 
   // edit:<id> — show the field menu (also used as the "Back"/"Done adding" target)
-  if (data.startsWith("edit:")) {
-    await showFieldMenu(chatId, data.slice("edit:".length), messageId);
+  if (action.kind === "edit") {
+    await showFieldMenu(chatId, action.id, messageId);
     return;
   }
-  if (data === "ef:close") {
+  if (action.kind === "close") {
     await saveDraft(chatId, { step: "idle", edit_entry_id: null });
     await editMessageText(
       chatId,
@@ -368,9 +370,8 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
   }
 
   // ef:<field>:<id> — title | date | desc | photos | add
-  const field = data.match(/^ef:(title|date|desc|photos|add):(.+)$/);
-  if (field) {
-    const [, kind, id] = field;
+  if (action.kind === "field") {
+    const { field: kind, id } = action;
     if (kind === "photos") {
       await showPhotosMenu(chatId, id, messageId);
       return;
@@ -394,7 +395,7 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
       date: "editing_date",
       desc: "editing_description",
     } as const;
-    await saveDraft(chatId, { step: stepByKind[kind as keyof typeof stepByKind], edit_entry_id: id });
+    await saveDraft(chatId, { step: stepByKind[kind], edit_entry_id: id });
     const prompt =
       kind === "title"
         ? "✍️ Send the new <b>title</b>."
@@ -406,17 +407,15 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
   }
 
   // ef:rm:<id>:<idx> — remove a photo by index
-  const rm = data.match(/^ef:rm:(.+):(\d+)$/);
-  if (rm) {
-    const [, id, idxStr] = rm;
-    const entry = await getEntryById(id);
+  if (action.kind === "removePhoto") {
+    const entry = await getEntryById(action.id);
     if (!entry) {
       await sendMessage(chatId, "That memory no longer exists. Send /edit to pick another.");
       return;
     }
-    const path = entry.photos[Number(idxStr)];
-    if (path) await deleteEntryPhoto(id, path);
-    await showPhotosMenu(chatId, id, messageId);
+    const path = entry.photos[action.index];
+    if (path) await deleteEntryPhoto(action.id, path);
+    await showPhotosMenu(chatId, action.id, messageId);
     return;
   }
 }
@@ -464,8 +463,7 @@ export async function POST(req: NextRequest) {
     }
 
     const text = msg.text?.trim();
-    const command =
-      text && text.startsWith("/") ? text.split(/\s+/)[0].split("@")[0].toLowerCase() : null;
+    const command = parseCommand(text);
 
     // Global commands (work in any state)
     if (command === "/start" || command === "/help") {
