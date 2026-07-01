@@ -16,6 +16,28 @@ if (!url || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KE
 
 const supabase = createClient(url, key, { auth: { persistSession: false } });
 
+const JOURNAL_TITLE = process.env.JOURNAL_TITLE || "Our Journal";
+const JOURNAL_SUBTITLE = process.env.JOURNAL_SUBTITLE || "A book of moments";
+
+/** Get-or-create the default journal so seeded entries have somewhere to live. */
+async function ensureJournal() {
+  const { data: existing } = await supabase
+    .from("journals")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return existing.id;
+  const slug = (JOURNAL_TITLE.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")) || "journal";
+  const { data, error } = await supabase
+    .from("journals")
+    .insert({ slug, title: JOURNAL_TITLE, subtitle: JOURNAL_SUBTITLE })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
 function svg(label, [c1, c2]) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
   <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -63,6 +85,7 @@ const samples = [
 ];
 
 async function seed() {
+  const journalId = await ensureJournal();
   let i = 0;
   for (const s of samples) {
     const photos = [];
@@ -70,6 +93,7 @@ async function seed() {
       photos.push(await uploadSvg(`${i + 1}.${p + 1}`, palettes[(i + p) % palettes.length]));
     }
     const { error } = await supabase.from("journal_entries").insert({
+      journal_id: journalId,
       event_date: s.event_date,
       title: s.title,
       description: s.description,

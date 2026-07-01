@@ -1,5 +1,5 @@
 import { getEntriesWithUrls } from "@/lib/entries";
-import { config } from "@/lib/config";
+import { ensureDefaultJournal, getJournalBySlug } from "@/lib/journals";
 import { PhotoCollage } from "@/components/PhotoCollage";
 import { PrintControls } from "@/components/PrintControls";
 import { formatLongDate, monthLabel } from "@/lib/dates";
@@ -9,13 +9,17 @@ export const dynamic = "force-dynamic";
 export default async function PrintPage({
   searchParams,
 }: {
-  searchParams: Promise<{ auto?: string }>;
+  searchParams: Promise<{ auto?: string; journal?: string }>;
 }) {
-  const { auto } = await searchParams;
+  const { auto, journal: journalSlug } = await searchParams;
+
+  const journal = journalSlug
+    ? (await getJournalBySlug(journalSlug)) ?? (await ensureDefaultJournal())
+    : await ensureDefaultJournal();
 
   let entries: Awaited<ReturnType<typeof getEntriesWithUrls>> = [];
   try {
-    entries = await getEntriesWithUrls();
+    entries = await getEntriesWithUrls(journal.id);
   } catch (err) {
     console.error("[print] could not load entries:", err);
   }
@@ -29,8 +33,8 @@ export default async function PrintPage({
         <span className="foil-border foil mb-7 rounded-full border px-3 py-1 font-body text-[0.6rem] font-semibold uppercase tracking-[0.32em]">
           Live Journal
         </span>
-        <h1 className="foil font-display text-5xl font-semibold leading-[1.05]">{config.title}</h1>
-        <p className="mt-4 font-hand text-3xl text-[#ecce97]">{config.subtitle}</p>
+        <h1 className="foil font-display text-5xl font-semibold leading-[1.05]">{journal.title}</h1>
+        <p className="mt-4 font-hand text-3xl text-[#ecce97]">{journal.subtitle}</p>
         <div className="foil-border my-8 w-20 border-t" />
         <p className="font-body text-xs uppercase tracking-[0.28em] text-[#d6bb8c]">
           {entries.length} {entries.length === 1 ? "memory" : "memories"}

@@ -59,10 +59,12 @@ Everything server-side uses the Supabase `service_role` key (which bypasses RLS)
 
 ### 1. Supabase
 
-Create a Supabase project (or reuse one), then provision the schema. The repo expects:
+Create a Supabase project (or reuse one), then provision the schema by running [`scripts/schema.sql`](scripts/schema.sql) in the Supabase SQL editor. It creates:
 
-- tables `journal_entries`, `journal_bot_drafts` + the `journal_append_draft_photo` function (RLS on, no policies)
-- a **private** storage bucket named `journal-photos`
+- tables `journals`, `journal_entries`, `journal_bot_drafts`, `journal_bot_settings` + the `journal_append_draft_photo` function (RLS on, no policies)
+- a **private** storage bucket named `journal-photos` (create this in Storage → New bucket, unchecked "Public")
+
+> Upgrading from an earlier single-journal version? `schema.sql` is additive/idempotent; the commented MIGRATION block at its end backfills your existing entries into a first journal (the app also does this automatically on next load).
 
 Grab your **Project URL** and **`service_role` secret** from *Project Settings → API*.
 
@@ -106,6 +108,17 @@ npm run set-webhook -- https://your-app.vercel.app
 | 5 | `/done` | publishes it to your book |
 
 `/cancel` discards the in-progress memory; `/help` shows the flow. Lock the bot to yourself by setting `TELEGRAM_ALLOWED_CHAT_IDS` to your chat id (the bot tells you yours).
+
+### Multiple journals
+
+Keep several photo books going at once — one per kid, one for travel, one for the year. Each is its own page:
+
+| You send | Bot does |
+|----------|----------|
+| `/journals` | lists your books; tap one to switch which book `/new` and `/edit` write to |
+| `/newjournal` | creates a new book (name → subtitle → done) and makes it active |
+
+Every journal has its own URL at **`/j/<slug>`** (the home page `/` shows your first/default one), and the web book gets a switcher in the header when you have more than one. Exports and the PDF view follow the journal you're viewing.
 
 ## Exports
 

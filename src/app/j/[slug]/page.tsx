@@ -1,13 +1,21 @@
+import { notFound } from "next/navigation";
 import { config } from "@/lib/config";
-import { ensureDefaultJournal, getJournals } from "@/lib/journals";
+import { getJournalBySlug, getJournals } from "@/lib/journals";
 import { loadJournalBook } from "@/lib/journal-page";
 import { PhotoBook } from "@/components/PhotoBook";
 
 // Always render fresh so new memories appear the moment the bot adds them.
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
-  const journal = await ensureDefaultJournal();
+export default async function JournalPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const journal = await getJournalBySlug(slug);
+  if (!journal) notFound();
+
   const journals = await getJournals();
   const { data, editEntries } = await loadJournalBook(journal);
 
