@@ -4,6 +4,7 @@ import { config } from "./config";
 
 export type Entry = {
   id: string;
+  journal_id: string;
   event_date: string; // YYYY-MM-DD
   title: string;
   description: string | null;
@@ -11,29 +12,33 @@ export type Entry = {
   created_at: string;
 };
 
+const ENTRY_COLS = "id,journal_id,event_date,title,description,photos,created_at";
+
 export type PhotoItem = { path: string; url: string };
 export type EntryWithUrls = Entry & { photoUrls: string[]; photoItems: PhotoItem[] };
 
 const SIGNED_URL_TTL = 60 * 60; // 1 hour
 
-/** All entries, oldest first (chronological book order). */
-export async function getEntries(): Promise<Entry[]> {
+/** All entries in a journal, oldest first (chronological book order). */
+export async function getEntries(journalId: string): Promise<Entry[]> {
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("journal_entries")
-    .select("id,event_date,title,description,photos,created_at")
+    .select(ENTRY_COLS)
+    .eq("journal_id", journalId)
     .order("event_date", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data ?? []) as Entry[];
 }
 
-/** The most recently-dated entries first (for the Telegram edit picker). */
-export async function getRecentEntries(limit = 10): Promise<Entry[]> {
+/** The most recently-dated entries in a journal first (for the Telegram edit picker). */
+export async function getRecentEntries(journalId: string, limit = 10): Promise<Entry[]> {
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("journal_entries")
-    .select("id,event_date,title,description,photos,created_at")
+    .select(ENTRY_COLS)
+    .eq("journal_id", journalId)
     .order("event_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -57,9 +62,9 @@ export async function signPhotoUrls(paths: string[]): Promise<Map<string, string
   return out;
 }
 
-/** Entries with their photos resolved to signed URLs. */
-export async function getEntriesWithUrls(): Promise<EntryWithUrls[]> {
-  const entries = await getEntries();
+/** Entries in a journal with their photos resolved to signed URLs. */
+export async function getEntriesWithUrls(journalId: string): Promise<EntryWithUrls[]> {
+  const entries = await getEntries(journalId);
   const signed = await signPhotoUrls(entries.flatMap((e) => e.photos));
   return entries.map((e) => {
     const photoItems: PhotoItem[] = e.photos
@@ -99,7 +104,7 @@ async function getEntry(id: string): Promise<Entry | null> {
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("journal_entries")
-    .select("id,event_date,title,description,photos,created_at")
+    .select(ENTRY_COLS)
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;

@@ -1,6 +1,7 @@
+import { NextRequest } from "next/server";
 import { getEntries, downloadPhotoDataUri } from "@/lib/entries";
 import { buildExportHtml, type ExportEntry } from "@/lib/html-export";
-import { config } from "@/lib/config";
+import { ensureDefaultJournal, getJournalBySlug } from "@/lib/journals";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,9 +11,13 @@ function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "journal";
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const entries = await getEntries();
+    const journalSlug = req.nextUrl.searchParams.get("journal");
+    const journal = journalSlug
+      ? (await getJournalBySlug(journalSlug)) ?? (await ensureDefaultJournal())
+      : await ensureDefaultJournal();
+    const entries = await getEntries(journal.id);
 
     const exportEntries: ExportEntry[] = await Promise.all(
       entries.map(async (e) => {
@@ -28,8 +33,8 @@ export async function GET() {
 
     const today = new Date().toISOString().slice(0, 10);
     const html = buildExportHtml({
-      title: config.title,
-      subtitle: config.subtitle,
+      title: journal.title,
+      subtitle: journal.subtitle,
       entries: exportEntries,
       generatedAt: today,
     });
@@ -37,7 +42,7 @@ export async function GET() {
     return new Response(html, {
       headers: {
         "content-type": "text/html; charset=utf-8",
-        "content-disposition": `attachment; filename="${slug(config.title)}-${today}.html"`,
+        "content-disposition": `attachment; filename="${slug(journal.title)}-${today}.html"`,
         "cache-control": "no-store",
       },
     });

@@ -19,6 +19,13 @@ import {
   deleteEntryPhoto,
   type Entry,
 } from "@/lib/entries";
+import {
+  getJournals,
+  getJournalById,
+  getActiveJournal,
+  setActiveJournal,
+  createJournal,
+} from "@/lib/journals";
 import { parseDateInput, formatLongDate, formatShortDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -34,7 +41,9 @@ type Step =
   | "editing_title"
   | "editing_date"
   | "editing_description"
-  | "editing_photos";
+  | "editing_photos"
+  | "awaiting_journal_title"
+  | "awaiting_journal_subtitle";
 
 type Draft = {
   chat_id: number;
@@ -44,6 +53,7 @@ type Draft = {
   description: string | null;
   photos: string[];
   edit_entry_id: string | null;
+  journal_id: string | null;
 };
 
 type TgPhotoSize = { file_id: string; width: number; height: number };
@@ -70,7 +80,7 @@ async function getDraft(chatId: number): Promise<Draft> {
   const supabase = getServiceClient();
   const { data } = await supabase
     .from("journal_bot_drafts")
-    .select("chat_id,step,title,event_date,description,photos,edit_entry_id")
+    .select("chat_id,step,title,event_date,description,photos,edit_entry_id,journal_id")
     .eq("chat_id", chatId)
     .maybeSingle();
   return (
@@ -82,6 +92,7 @@ async function getDraft(chatId: number): Promise<Draft> {
       description: null,
       photos: [],
       edit_entry_id: null,
+      journal_id: null,
     }
   );
 }
@@ -128,9 +139,36 @@ function helpText(chatId: number): string {
     "5. send up to <b>3 photos</b>\n" +
     "6. /done — save it ✨\n\n" +
     "✏️ <b>Edit a memory:</b> /edit — change the title, date, description, or photos of a recent memory.\n\n" +
+    "📚 <b>Journals:</b> keep several books at once.\n" +
+    "• /journals — switch which book /new and /edit use\n" +
+    "• /newjournal — start a brand-new book\n\n" +
     "Anytime: /cancel to discard, /help to see this." +
     lock
   );
+}
+
+// ── Journals (multiple books; the bot writes to the "active" one) ─────────────
+
+/** The switch-journal menu: one button per journal + a "new journal" button. */
+async function journalsMenu(
+  chatId: number,
+): Promise<{ text: string; reply_markup: { inline_keyboard: InlineButton[][] } }> {
+  const journals = await getJournals();
+  const active = await getActiveJournal(chatId);
+  const rows: InlineButton[][] = journals.map((j) => [
+    {
+      text: `${j.id === active.id ? "✅ " : "📖 "}${j.title}`.slice(0, 60),
+      callback_data: `jrn:set:${j.id}`,
+    },
+  ]);
+  rows.push([{ text: "➕ New journal", callback_data: "jrn:new" }]);
+  return {
+    text:
+      "📚 <b>Your journals</b>\n" +
+      `Currently writing to <b>${escapeHtml(active.title)}</b>.\n` +
+      "Pick another to switch, or start a new one.",
+    reply_markup: { inline_keyboard: rows },
+  };
 }
 
 async function publish(chatId: number): Promise<void> {
@@ -140,8 +178,13 @@ async function publish(chatId: number): Promise<void> {
     await clearDraft(chatId, true);
     return;
   }
+  // The target journal was snapshotted at /new; fall back to the active one.
+  const journal = draft.journal_id
+    ? (await getJournalById(draft.journal_id)) ?? (await getActiveJournal(chatId))
+    : await getActiveJournal(chatId);
   const supabase = getServiceClient();
   const { error } = await supabase.from("journal_entries").insert({
+    journal_id: journal.id,
     event_date: draft.event_date,
     title: draft.title,
     description: draft.description,
@@ -153,10 +196,11 @@ async function publish(chatId: number): Promise<void> {
   }
   await clearDraft(chatId, false);
   const count = draft.photos.length;
-  const link = config.siteUrl ? `\n\n📖 View your book: ${config.siteUrl}` : "";
+  const bookUrl = config.siteUrl ? `${config.siteUrl}/j/${journal.slug}` : "";
+  const link = bookUrl ? `\n\n📖 View <b>${escapeHtml(journal.title)}</b>: ${bookUrl}` : "";
   await sendMessage(
     chatId,
-    `✅ <b>Saved to your journal!</b>\n\n` +
+    `✅ <b>Saved to ${escapeHtml(journal.title)}!</b>\n\n` +
       `🗓️ ${formatLongDate(draft.event_date)}\n` +
       `📌 ${escapeHtml(draft.title)}\n` +
       `🖼️ ${count} photo${count === 1 ? "" : "s"}` +
@@ -352,6 +396,31 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
   await answerCallbackQuery(cb.id); // ack to clear the button spinner
   const data = cb.data ?? "";
 
+  // jrn:set:<id> — switch the active journal the bot writes to
+  if (data.startsWith("jrn:set:")) {
+    const id = data.slice("jrn:set:".length);
+    const journal = await getJournalById(id);
+    if (!journal) {
+      await editMessageText(chatId, messageId, "That journal no longer exists. Send /journals to pick another.");
+      return;
+    }
+    await setActiveJournal(chatId, journal.id);
+    await editMessageText(
+      chatId,
+      messageId,
+      `✅ Now writing to <b>${escapeHtml(journal.title)}</b>.\n\n/new to add a memory · /journals to switch again.`,
+    );
+    return;
+  }
+
+  // jrn:new — start the "create a journal" flow
+  if (data === "jrn:new") {
+    await clearDraft(chatId, true); // drop any half-finished draft + its photos
+    await saveDraft(chatId, { step: "awaiting_journal_title" });
+    await sendMessage(chatId, "📚 <b>New journal.</b> What should it be called?");
+    return;
+  }
+
   // edit:<id> — show the field menu (also used as the "Back"/"Done adding" target)
   if (data.startsWith("edit:")) {
     await showFieldMenu(chatId, data.slice("edit:".length), messageId);
@@ -477,23 +546,44 @@ export async function POST(req: NextRequest) {
       await sendMessage(chatId, "❌ Discarded. Send /new to start a new memory.");
       return ok();
     }
+    if (command === "/journals") {
+      await clearDraft(chatId, true); // discard any half-finished draft + its photos
+      const { text: menuText, reply_markup } = await journalsMenu(chatId);
+      await sendMessage(chatId, menuText, { reply_markup });
+      return ok();
+    }
+    if (command === "/newjournal") {
+      await clearDraft(chatId, true);
+      await saveDraft(chatId, { step: "awaiting_journal_title" });
+      await sendMessage(chatId, "📚 <b>New journal.</b> What should it be called?");
+      return ok();
+    }
     if (command === "/new") {
       await clearDraft(chatId, true);
+      const journal = await getActiveJournal(chatId);
       await saveDraft(chatId, {
         step: "awaiting_title",
         title: null,
         event_date: null,
         description: null,
         photos: [],
+        journal_id: journal.id,
       });
-      await sendMessage(chatId, "📌 <b>New memory.</b> What's the title?");
+      await sendMessage(
+        chatId,
+        `📌 <b>New memory</b> in <b>${escapeHtml(journal.title)}</b>.\nWhat's the title? <i>(switch books with /journals)</i>`,
+      );
       return ok();
     }
     if (command === "/edit") {
       await clearDraft(chatId, true); // discard any half-finished /new draft + its photos
-      const entries = await getRecentEntries(10);
+      const journal = await getActiveJournal(chatId);
+      const entries = await getRecentEntries(journal.id, 10);
       if (!entries.length) {
-        await sendMessage(chatId, "You don't have any memories yet. Send /new to add one.");
+        await sendMessage(
+          chatId,
+          `<b>${escapeHtml(journal.title)}</b> has no memories yet. Send /new to add one, or /journals to switch books.`,
+        );
         return ok();
       }
       const rows = entries.map((e) => [
@@ -502,9 +592,11 @@ export async function POST(req: NextRequest) {
           callback_data: `edit:${e.id}`,
         },
       ]);
-      await sendMessage(chatId, "✏️ <b>Edit a memory</b>\nPick one to change:", {
-        reply_markup: { inline_keyboard: rows },
-      });
+      await sendMessage(
+        chatId,
+        `✏️ <b>Edit a memory</b> in <b>${escapeHtml(journal.title)}</b>\nPick one to change:`,
+        { reply_markup: { inline_keyboard: rows } },
+      );
       return ok();
     }
 
@@ -575,6 +667,44 @@ export async function POST(req: NextRequest) {
           return ok();
         }
         await sendMessage(chatId, "📷 Send a photo, or /done to save this memory.");
+        return ok();
+      }
+
+      case "awaiting_journal_title": {
+        if (!text || command) {
+          await sendMessage(chatId, "Please send the journal's name as text. 📚");
+          return ok();
+        }
+        // Reuse draft.title to hold the pending journal name.
+        await saveDraft(chatId, { title: text.slice(0, 200), step: "awaiting_journal_subtitle" });
+        await sendMessage(
+          chatId,
+          "✍️ Add a short <b>subtitle</b> for the cover (e.g. <i>A book of moments</i>), or /skip.",
+        );
+        return ok();
+      }
+
+      case "awaiting_journal_subtitle": {
+        if (command && command !== "/skip") {
+          await sendMessage(chatId, "Send a subtitle as text, or /skip.");
+          return ok();
+        }
+        const name = draft.title;
+        if (!name) {
+          await sendMessage(chatId, "Something went wrong. Send /newjournal to try again.");
+          await clearDraft(chatId, true);
+          return ok();
+        }
+        const subtitle = command === "/skip" ? "" : (text ?? "");
+        const journal = await createJournal(name, subtitle);
+        await setActiveJournal(chatId, journal.id);
+        await clearDraft(chatId, false);
+        const bookUrl = config.siteUrl ? `\n📖 ${config.siteUrl}/j/${journal.slug}` : "";
+        await sendMessage(
+          chatId,
+          `✅ Created <b>${escapeHtml(journal.title)}</b> — now your active journal.\n` +
+            `Send /new to add its first memory.${bookUrl}`,
+        );
         return ok();
       }
 

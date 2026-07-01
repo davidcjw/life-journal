@@ -15,6 +15,8 @@ const Flipbook = dynamic(() => import("./Flipbook"), {
   ),
 });
 
+export type JournalRef = { slug: string; title: string };
+
 export type PhotoBookProps = {
   entries: (EntryPageData & { id: string })[];
   editEntries: EditEntryData[];
@@ -22,6 +24,10 @@ export type PhotoBookProps = {
   title: string;
   subtitle: string;
   botUsername?: string;
+  /** Slug of the journal being shown (drives export/print links). */
+  slug: string;
+  /** All journals in the deployment (drives the switcher; hidden when only one). */
+  journals: JournalRef[];
 };
 
 export function PhotoBook({
@@ -31,6 +37,8 @@ export function PhotoBook({
   title,
   subtitle,
   botUsername,
+  slug,
+  journals,
 }: PhotoBookProps) {
   const [api, setApi] = useState<FlipApi | null>(null);
   const [page, setPage] = useState(0);
@@ -53,6 +61,8 @@ export function PhotoBook({
   }, [api]);
 
   const botLink = botUsername ? `https://t.me/${botUsername}` : null;
+  const exportHref = `/api/export/html?journal=${encodeURIComponent(slug)}`;
+  const printHref = `/print?journal=${encodeURIComponent(slug)}`;
 
   const label =
     page <= 0 ? "Cover" : page >= lastIndex ? "The End" : `${page} of ${total - 2}`;
@@ -60,7 +70,24 @@ export function PhotoBook({
   return (
     <div className="lj-desk flex min-h-dvh flex-col">
       <header className="no-print z-20 flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <span className="font-display text-lg font-semibold text-[#f0e2c9]">{title}</span>
+        {journals.length > 1 ? (
+          <select
+            aria-label="Switch journal"
+            value={slug}
+            onChange={(e) => {
+              window.location.href = `/j/${e.target.value}`;
+            }}
+            className="max-w-[52vw] truncate rounded-md border border-[#f0e2c9]/25 bg-transparent px-2 py-1 font-display text-lg font-semibold text-[#f0e2c9] outline-none focus:border-[#f0e2c9]/60"
+          >
+            {journals.map((j) => (
+              <option key={j.slug} value={j.slug} className="text-ink">
+                {j.title}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="font-display text-lg font-semibold text-[#f0e2c9]">{title}</span>
+        )}
         <nav className="flex items-center gap-2">
           {editEntries.length > 0 ? (
             <button
@@ -72,13 +99,13 @@ export function PhotoBook({
               <span className="hidden sm:inline">Edit</span>
             </button>
           ) : null}
-          <a className="lj-btn lj-btn-ghost" href="/api/export/html" aria-label="Download as HTML">
+          <a className="lj-btn lj-btn-ghost" href={exportHref} aria-label="Download as HTML">
             <Download width={16} height={16} />
             <span className="hidden sm:inline">HTML</span>
           </a>
           <a
             className="lj-btn lj-btn-ghost"
-            href="/print"
+            href={printHref}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Save as PDF"
