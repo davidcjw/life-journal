@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "seed": "node --env-file=.env.local scripts/seed.mjs",
     "seed:clear": "node --env-file=.env.local scripts/seed.mjs --clear",
     "set-webhook": "node --env-file=.env.local scripts/set-webhook.mjs"
@@ -28,6 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.6"
   }
 }
