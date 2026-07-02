@@ -396,7 +396,8 @@ async function handleCallback(cb: TgCallbackQuery): Promise<void> {
     return;
   }
   await answerCallbackQuery(cb.id); // ack to clear the button spinner
-  const action = parseCallbackData(cb.data ?? "");
+  const data = cb.data ?? "";
+  const action = parseCallbackData(data);
 
   // jrn:set:<id> — switch the active journal the bot writes to
   if (data.startsWith("jrn:set:")) {
