@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addEntryPhoto, deleteEntryPhoto, normalizeImageExt } from "@/lib/entries";
+import { requireAuth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,9 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB
 
 // Add a photo to an existing memory (multipart form, field name "photo").
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const { id } = await ctx.params;
 
   let file: File | null = null;
@@ -50,6 +54,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 // Remove a photo from a memory (JSON body: { path }).
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const { id } = await ctx.params;
 
   let body: { path?: unknown };

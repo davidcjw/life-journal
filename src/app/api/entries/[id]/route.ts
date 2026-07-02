@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateEntryDescription } from "@/lib/entries";
+import { requireAuth } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,6 +8,9 @@ export const dynamic = "force-dynamic";
 // Edit an existing memory. Only the free-text description is editable here;
 // photos are managed via the /photos sub-route.
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const { id } = await ctx.params;
 
   let body: { description?: unknown };

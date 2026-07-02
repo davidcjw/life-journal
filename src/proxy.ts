@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, sessionToken, timingSafeStringEqual } from "@/lib/auth";
 
 /**
  * Optional site-wide password gate (Next.js 16 "proxy").
@@ -17,7 +17,7 @@ export async function proxy(req: NextRequest) {
   }
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  if (token && token === (await sessionToken(password))) {
+  if (token && timingSafeStringEqual(token, await sessionToken(password))) {
     return NextResponse.next();
   }
 

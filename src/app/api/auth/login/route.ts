@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, sessionToken, timingSafeStringEqual } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const next = safeNext(form.get("next"));
   const expected = process.env.SITE_PASSWORD ?? "";
 
-  if (!expected || password !== expected) {
+  if (!expected || !timingSafeStringEqual(password, expected)) {
     const url = new URL("/login", req.url);
     url.searchParams.set("error", "1");
     if (next !== "/") url.searchParams.set("next", next);
